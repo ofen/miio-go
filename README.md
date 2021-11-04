@@ -1,6 +1,6 @@
 Golang client and Xiaomi IOT binary protocol implementation
 
-Thanks to [@dovchinnikov](https://github.com/dovchinnikov) for base implementation: https://github.com/dovchinnikov/go-miio
+This project based on [@dovchinnikov](https://github.com/dovchinnikov) work: https://github.com/dovchinnikov/go-miio
 
 ## Install
 ```go
