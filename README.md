@@ -70,3 +70,7 @@ func main() {
 
 }
 ```
+## Additional resource
+* https://github.com/OpenMiHome/mihome-binary-protocol
+* https://github.com/rytilahti/python-miio
+* https://home.miot-spec.com/
