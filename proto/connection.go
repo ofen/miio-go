@@ -1,58 +1,55 @@
 package proto
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"net"
 	"time"
+	"unicode"
 )
 
 const (
-	// DefaultReadBufferSize is maximum size of read buffer
-	// (could be overrided)
+	// DefaultReadBufferSize is maximum size of read buffer.
+	// Use SetReadBufferSize to override.
 	DefaultReadBufferSize = 4096
-	proto                 = "udp"
+	// DefaultDeadline is default connection deadline
+	// that is used when none is set.
+	// Use SetReadDeadline, SetWriteDeadline or SetDeadline to override.
+	DefaultDeadline = 5 * time.Second
+	proto           = "udp"
 )
 
-// Conn is protocol connection
-// Implements net.Conn interface https://pkg.go.dev/net#Conn
+// Conn is protocol connection.
+// Implements net.Conn interface https://pkg.go.dev/net#Conn.
 type Conn struct {
-	Token          []byte
-	ReadBufferSize int
+	token          []byte
+	readBufferSize int
 	requestID      int
 	conn           net.Conn
 	keys           deviceKeys
+	readDeadline   bool
+	writeDeadline  bool
 }
 
 // Dial connects to the device with given token.
-// Token should be 32 characters in lenght (16 bytes).
+// Token should be 16 bytes in lenght.
 //
 // Example:
-//   Dial("192.168.0.3:54321", "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3")
-func Dial(addr string, token string) (Conn, error) {
+//   Dial("192.168.0.3:54321", []byte{...})
+//   Dial("192.168.0.3:54321", nil)
+func Dial(addr string, token []byte) (Conn, error) {
 	conn, err := net.Dial(proto, addr)
 	if err != nil {
 		return Conn{}, err
 	}
 
-	t, err := hex.DecodeString(token)
-	if err != nil {
-		return Conn{}, err
-	}
-
-	tokenLenght := len(t)
-	if tokenLenght != 16 {
-		return Conn{}, fmt.Errorf("expected 16 bytes token, got %d", tokenLenght)
-	}
-
-	keys := newDeviceKeys(t)
-
 	return Conn{
-		Token:          t,
-		ReadBufferSize: DefaultReadBufferSize,
+		token:          token,
+		readBufferSize: DefaultReadBufferSize,
 		conn:           conn,
-		keys:           keys,
+		keys:           newDeviceKeys(token),
 	}, nil
 }
 
@@ -60,15 +57,27 @@ func Dial(addr string, token string) (Conn, error) {
 // Read can be made to time out and return an error after a fixed
 // time limit; see SetDeadline and SetReadDeadline.
 func (c *Conn) Read(b []byte) (int, error) {
-	buff := make([]byte, c.ReadBufferSize)
+	buff := make([]byte, c.readBufferSize)
+
+	if !c.readDeadline {
+		c.conn.SetDeadline(time.Now().Add(DefaultDeadline))
+	}
+
 	n, err := c.conn.Read(buff)
 	if err != nil {
 		return n, err
 	}
 
-	copy(b, c.keys.decrypt(buff[32:]))
+	decrypted := c.keys.decrypt(buff[32:n])
 
-	return n - 32, nil
+	// trim non-printable characters
+	decrypted = bytes.TrimFunc(decrypted, func(r rune) bool {
+		return !unicode.IsGraphic(r)
+	})
+
+	copy(b, decrypted)
+
+	return len(decrypted), nil
 }
 
 // Write writes data to the connection.
@@ -80,8 +89,16 @@ func (c *Conn) Write(b []byte) (int, error) {
 		return 0, err
 	}
 
+	if c.Token() == "" {
+		c.SetToken(h.Token())
+	}
+
 	encrypted := c.keys.encrypt(b)
-	req := prepareRequest(c.Token, h, encrypted)
+	req := prepareRequest(c.token, h, encrypted)
+
+	if !c.writeDeadline {
+		c.conn.SetDeadline(time.Now().Add(DefaultDeadline))
+	}
 
 	return c.conn.Write(req)
 }
@@ -124,6 +141,8 @@ func (c *Conn) RemoteAddr() net.Addr {
 //
 // A zero value for t means I/O operations will not time out.
 func (c *Conn) SetDeadline(t time.Time) error {
+	c.readDeadline = true
+	c.writeDeadline = true
 	return c.conn.SetDeadline(t)
 }
 
@@ -131,6 +150,7 @@ func (c *Conn) SetDeadline(t time.Time) error {
 // and any currently-blocked Read call.
 // A zero value for t means Read will not time out.
 func (c *Conn) SetReadDeadline(t time.Time) error {
+	c.readDeadline = true
 	return c.conn.SetReadDeadline(t)
 }
 
@@ -140,38 +160,84 @@ func (c *Conn) SetReadDeadline(t time.Time) error {
 // some of the data was successfully written.
 // A zero value for t means Write will not time out.
 func (c *Conn) SetWriteDeadline(t time.Time) error {
+	c.writeDeadline = true
 	return c.conn.SetWriteDeadline(t)
 }
 
-type handshakeResponse struct {
-	deviceID    uint32
-	serverStamp uint32
+// SetReadBufferSize sets read buffer
+func (c *Conn) SetReadBufferSize(size int) {
+	c.readBufferSize = size
 }
 
-func parseHandshakeResponse(b []byte) (*handshakeResponse, error) {
-	lenght := len(b)
-	if lenght != 32 {
-		return nil, fmt.Errorf("unable to parse handshake, expected 32 bytes, got %d", lenght)
+// Token shows string representation of token
+// used by connection
+func (c *Conn) Token() string {
+	return fmt.Sprintf("%x", c.token)
+}
+
+// SetToken sets token
+func (c *Conn) SetToken(token string) {
+	tokenBytes, err := hex.DecodeString(token)
+	if err != nil {
+		panic(err)
 	}
-	deviceID := binary.BigEndian.Uint32(b[8:])
-	serverStamp := binary.BigEndian.Uint32(b[12:])
-	return &handshakeResponse{deviceID, serverStamp}, nil
+
+	tokenLength := len(tokenBytes)
+	if tokenLength != 16 {
+		panic(fmt.Errorf("expected 16 bytes token, got %d", tokenLength))
+	}
+
+	c.token = tokenBytes
+	c.keys = newDeviceKeys(tokenBytes)
+}
+
+type handshakeResponse struct {
+	helo        []byte
+	deviceID    []byte
+	serverStamp []byte
+	token       []byte
+}
+
+func (h *handshakeResponse) ServerStamp() time.Duration {
+	return time.Duration(binary.BigEndian.Uint32(h.serverStamp)) * time.Second
+}
+
+func (h *handshakeResponse) Token() string {
+	return fmt.Sprintf("%x", h.token)
+}
+
+func (h handshakeResponse) String() string {
+	return fmt.Sprintf("{helo:%x deviceID:%x serverStamp:%v token:%s}", h.helo, h.deviceID, h.ServerStamp(), h.Token())
+}
+
+func parseHandshakeResponse(data []byte) (*handshakeResponse, error) {
+	length := len(data)
+	if length != 32 {
+		return nil, fmt.Errorf("unable to parse handshake, expected 32 bytes, got %d", length)
+	}
+
+	return &handshakeResponse{
+		helo:        data[:8],
+		deviceID:    data[8:12],
+		serverStamp: data[12:16],
+		token:       data[16:],
+	}, nil
 }
 
 func (c *Conn) handshake() (*handshakeResponse, error) {
-	req := []byte{
+	helo := []byte{
 		0x21, 0x31, 0x00, 0x20, 0xff, 0xff, 0xff, 0xff,
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 		0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 	}
 
-	_, err := c.conn.Write(req)
+	_, err := c.conn.Write(helo)
 	if err != nil {
 		return nil, err
 	}
 
-	resp := make([]byte, c.ReadBufferSize)
+	resp := make([]byte, c.readBufferSize)
 	n, err := c.conn.Read(resp)
 	if err != nil {
 		return nil, err
@@ -183,8 +249,8 @@ func (c *Conn) handshake() (*handshakeResponse, error) {
 func prepareRequest(token []byte, handshake *handshakeResponse, requestBody []byte) []byte {
 	header := [32]byte{0x21, 0x31}
 	binary.BigEndian.PutUint16(header[2:], uint16(32+len(requestBody)))
-	binary.BigEndian.PutUint32(header[8:], handshake.deviceID)
-	binary.BigEndian.PutUint32(header[12:], handshake.serverStamp)
+	binary.BigEndian.PutUint32(header[8:], binary.BigEndian.Uint32(handshake.deviceID))
+	binary.BigEndian.PutUint32(header[12:], binary.BigEndian.Uint32(handshake.serverStamp))
 	checksum := md5(header[:16], token, requestBody)
 	copy(header[16:], checksum)
 	return append(header[:], requestBody...)

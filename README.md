@@ -13,30 +13,18 @@ go get github.com/ofen/miio-go
 package main
 
 import (
-    "encoding/json"
     "fmt"
     "os"
+    "time"
 
     "github.com/ofen/miio-go"
 )
 
-type response struct {
-    ID            int      `json:"id"`
-    Result        []result `json:"result"`
-    ExecutionTime int      `json:"exe_time"`
-}
-
-type result struct {
-    DID   string      `json:"did"`
-    SIID  int         `json:"siid"`
-    PIID  int         `json:"piid"`
-    Code  int         `json:"code"`
-    Value interface{} `json:"value"`
-}
-
 func main() {
-    client := miio.New("192.168.0.3:54321", "a0b1c2d3e4f5a0b1c2d3e4f5a0b1c2d3")
+    client := miio.New("192.168.0.3:54321")
     defer client.Close()
+
+    client.SetToken("c91034a067f36f4558624e65a6f927a7") // will try to use token from handshake if not set
 
     // https://home.miot-spec.com/spec/mmgg.pet_waterer.s1
     payload := []map[string]interface{}{
@@ -57,18 +45,12 @@ func main() {
 
     resp, err := client.GetProperties(payload)
     if err != nil {
-        panic(err)
+        panic(client.Token(), err)
     }
 
-    v := response{}
-
-    if err := json.Unmarshal(resp, &v); err != nil {
-        panic(err)
-    }
-
-    fmt.Printf("%+v\n", v)
-
+    fmt.Printf("%s\n", resp)
 }
+
 ```
 ## Additional resources
 * https://github.com/OpenMiHome/mihome-binary-protocol

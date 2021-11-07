@@ -6,7 +6,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	_ "crypto/md5" // hash function required by crypto module
-	"unicode"
 )
 
 func md5(chunks ...[]byte) []byte {
@@ -14,6 +13,7 @@ func md5(chunks ...[]byte) []byte {
 	for _, chunk := range chunks {
 		src.Write(chunk)
 	}
+
 	return src.Sum(nil)
 }
 
@@ -24,6 +24,7 @@ type deviceKeys struct {
 
 func newDeviceKeys(token []byte) deviceKeys {
 	key := md5(token)
+
 	return deviceKeys{
 		key,
 		md5(key, token),
@@ -35,6 +36,7 @@ func (keys *deviceKeys) newCipher() cipher.Block {
 	if err != nil {
 		panic(err)
 	}
+
 	return block
 }
 
@@ -43,6 +45,7 @@ func (keys *deviceKeys) encrypt(src []byte) []byte {
 	padded := padding(src, mode.BlockSize())
 	dst := make([]byte, len(padded))
 	mode.CryptBlocks(dst, padded)
+
 	return dst
 }
 
@@ -50,14 +53,13 @@ func (keys *deviceKeys) decrypt(src []byte) []byte {
 	mode := cipher.NewCBCDecrypter(keys.newCipher(), keys.iv)
 	dst := make([]byte, len(src))
 	mode.CryptBlocks(dst, src)
-	// trim non-printable characters
-	return bytes.TrimFunc(dst, func(r rune) bool {
-		return !unicode.IsGraphic(r)
-	})
+
+	return dst
 }
 
 func padding(src []byte, blockSize int) []byte {
 	padding := blockSize - len(src)%blockSize
 	padtext := bytes.Repeat([]byte{byte(padding)}, padding)
+
 	return append(src, padtext...)
 }
