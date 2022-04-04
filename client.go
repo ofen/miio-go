@@ -3,6 +3,7 @@ package miio
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/ofen/miio-go/proto"
@@ -25,7 +26,10 @@ func New(addr string) *Client {
 		panic(err)
 	}
 
-	return &Client{sync.Mutex{}, conn, 1}
+	client := &Client{sync.Mutex{}, conn, 1}
+	runtime.SetFinalizer(client, (*client).Close)
+
+	return client
 }
 
 // Send sends request to device.

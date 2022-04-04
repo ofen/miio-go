@@ -22,8 +22,6 @@ import (
 
 func main() {
     client := miio.New("192.168.0.3:54321")
-    defer client.Close()
-
     client.SetToken("c91034a067f36f4558624e65a6f927a7") // will try to use token from handshake if not set
 
     // https://home.miot-spec.com/spec/mmgg.pet_waterer.s1
