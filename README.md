@@ -5,7 +5,7 @@ Client for Xiaomi IoT binary protocol. Project based on https://github.com/dovch
 go get github.com/ofen/miio-go
 ```
 
-## Example:
+## Example
 
 ```go
 package main
