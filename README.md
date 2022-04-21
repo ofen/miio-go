@@ -1,4 +1,4 @@
-JSON-RPC client for Xiaomi IoT binary protocol. Project based on https://github.com/dovchinnikov/go-miio.
+JSON-RPC client implementation for Xiaomi IoT binary protocol. Project based on https://github.com/dovchinnikov/go-miio.
 
 ## Install
 ```sh
